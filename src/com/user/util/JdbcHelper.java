@@ -1,6 +1,8 @@
 package com.user.util;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 public class JdbcHelper {
 
@@ -46,16 +48,79 @@ public class JdbcHelper {
     }
 
 
-    // ---------- 增删改：只传 SQL，直接执行 ----------
+    @FunctionalInterface
+    public interface RowMapper<T> {
+        T map(ResultSet rs) throws SQLException;
+    }
+
+    // ---------- 增删改：支持 ? 占位符 ----------
     public static int update(String sql) {
+        return update(sql, new Object[0]);
+    }
+
+    public static int update(String sql, Object... params) {
         if (sql == null || sql.trim().isEmpty()) {
             throw new IllegalArgumentException("SQL 不能为空");
         }
         try (Connection conn = getConnection();
-             Statement stmt = conn.createStatement()) {
-            return stmt.executeUpdate(sql);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            bind(stmt, params);
+            return stmt.executeUpdate();
         } catch (SQLException e) {
             throw new DataAccessException("执行更新失败: " + sql, e);
+        }
+    }
+
+    // ---------- 查询：返回列表 ----------
+    public static <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
+        if (sql == null || sql.trim().isEmpty()) {
+            throw new IllegalArgumentException("SQL 不能为空");
+        }
+        if (mapper == null) {
+            throw new IllegalArgumentException("RowMapper 不能为空");
+        }
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            bind(stmt, params);
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<T> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(mapper.map(rs));
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new DataAccessException("执行查询失败: " + sql, e);
+        }
+    }
+
+    // ---------- 查询：只返回第一条 ----------
+    public static <T> T queryOne(String sql, RowMapper<T> mapper, Object... params) {
+        if (sql == null || sql.trim().isEmpty()) {
+            throw new IllegalArgumentException("SQL 不能为空");
+        }
+        if (mapper == null) {
+            throw new IllegalArgumentException("RowMapper 不能为空");
+        }
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            bind(stmt, params);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? mapper.map(rs) : null;
+            }
+        } catch (SQLException e) {
+            throw new DataAccessException("执行查询失败: " + sql, e);
+        }
+    }
+
+    private static void bind(PreparedStatement stmt, Object[] params) throws SQLException {
+        if (params == null) {
+            return;
+        }
+        for (int i = 0; i < params.length; i++) {
+            stmt.setObject(i + 1, params[i]);
         }
     }
 
